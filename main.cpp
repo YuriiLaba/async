@@ -1,63 +1,37 @@
-//#include <boost/algorithm/string/replace.hpp>
 #include <iostream>
 #include <fstream>
 #include <map>
 #include <vector>
 #include <thread>
+#include <set>
+#include <algorithm>
+#include <iterator>
 #include <mutex>
-#include <sstream>
 #include <future>
-
+#include <sstream>
 
 using namespace std;
-//g++ read.cpp -pthread -std=c++11
-using words_counter_t = map<string, int>;
-words_counter_t m;
-mutex myMutex;
-//words_counter_t checkM;
 
-//string format_word(string word) {
-//    boost::replace_all(word, "-", " ");
-//    boost::replace_all(word, "`", " ");
-//    boost::replace_all(word, "?", " ");
-//    boost::replace_all(word, ".", " ");
-//    boost::replace_all(word, "!", " ");
-//    boost::replace_all(word, "\"", " ");
-//    boost::replace_all(word, ".", " ");
-//    boost::replace_all(word, "'", " ");
-//    boost::replace_all(word, "'", " ");
-//    boost::replace_all(word, ";", " ");
-//    boost::replace_all(word, ",", " ");
-//    return word;
-//}
 
-void printMap(const words_counter_t &m) {
+inline std::chrono::high_resolution_clock::time_point get_current_time_fenced() {
+    std::atomic_thread_fence(memory_order_seq_cst);
+    auto res_time = std::chrono::high_resolution_clock::now();
+    std::atomic_thread_fence(memory_order_seq_cst);
+    return res_time;
+}
+
+template<class D>
+inline long long to_us(const D& d) {
+    return std::chrono::duration_cast<chrono::microseconds>(d).count();
+}
+
+void printMap(const map<string,int> &m) {
     for (auto elem : m) {
-        cout << elem.first << " " << elem.second << "\n";
+        cout << elem.first << ":" << elem.second << "\n";
     }
 }
 
-
-vector<string> open_read(string path) {
-    ifstream myfile;
-    vector<string> words;
-    string word;
-    myfile.open(path);
-    if (!myfile.is_open()) {
-        cerr << "Error" << endl;
-        return words;
-    }
-    string formated_word;
-    while (myfile >> word) {
-        formated_word = word;  //format_word(word);
-        words.push_back(formated_word);
-        //        ++checkM[word];       // check map with only main thread
-    }
-    myfile.close();
-    return words;
-}
-
-void write_to_file(const words_counter_t &m, string path) {
+void write_to_file(const map<string,int>  &m, string path) {
     ofstream myfile;
     myfile.open(path);
     for (auto elem : m) {
@@ -66,54 +40,131 @@ void write_to_file(const words_counter_t &m, string path) {
     myfile.close();
 }
 
-words_counter_t mapper(int l, int r, const vector<string> &words) {
-    words_counter_t mp;
-    for (; l <= r; ++l) {
-        ++mp[words[l]];
+
+map<string, int> CountWords(const vector<string>& wordsVector, int start, int end) {
+    map<string, int> mp;
+    for (; start <= end; ++start) {
+        ++mp[wordsVector[start]];
     }
     return mp;
-
 }
-
-void reducer( words_counter_t &master, const words_counter_t& mp){
-    for (auto w: mp) {
-        master[w.first] += w.second;
+void reducer( map<string, int> &wordsCount, const map<string, int>& local_map){
+    for (auto w: local_map) {
+        wordsCount[w.first] += w.second;
     }
 }
 
 
-int main(int argc, char *argv[]) {  // input_file, threads, output_file
-    vector<string> words;
-    vector< future<words_counter_t> > result_futures;
+// Divide vector into n equally parts, n - number of threads
+vector<int> SplitVector(const vector<string>& vec, int n) {
 
-    if (!argv[1]) words = open_read("data.txt");
-    else words = open_read(argv[1]);
+    vector<int> outVec;
+    int length = int(vec.size())/ n;
+    int count = 0;
+    int sum = 0;
+
+    outVec.push_back(0);
+    while(count != n - 1){
+        sum += length;
+        outVec.push_back(sum);
+        //cout<<outVec[count]<<endl;
+        count++;
+    }
+    outVec.push_back(int(vec.size()));
+    return outVec;
+}
 
 
-    istringstream ss(argv[2]);
+int main() {
 
-    cout << "Spawning " << 5 << " workers" << endl;
-    for (int i = 0; i < 5; ++i) {
-        size_t a = (words.size()) / 5 * i;
-        size_t b = (words.size()) / 5 * (i + 1);
-//        cout << (i + 1) << " interval from " << a << " to " << b - 1 << " word" << endl;
-        result_futures.push_back(
-                async(std::launch::async, mapper, a, b - 1, cref(words))
-        );
+    string input_data[4], infile, out_by_a, out_by_n;
+    int threads_n;
+    ifstream myFile;
+    myFile.open("data_input.txt");
+
+    for(int i = 0; i < 4; i++)
+        myFile >> input_data[i];
+    myFile.close();
+
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < input_data[i].length(); j++) {
+            if (input_data[i][j] == '=')
+                input_data[i][j] = ' ';
+        }
+        stringstream ss(input_data[i]);
+        string temp;
+        int k = 0;
+        while (ss >> temp) {
+            if (k != 0) {
+                stringstream lineStream(temp);
+                string s;
+                getline(lineStream,s,',');
+                s.erase(remove( s.begin(), s.end(), '\"' ), s.end());
+                input_data[i] = s;
+            }
+            k++;
+        }
     }
 
-    vector<words_counter_t> results;
-    for(size_t i = 0; i<result_futures.size(); ++i)
+    infile = input_data[0];
+    out_by_a = input_data[1];
+    out_by_n = input_data[2];
+    threads_n = stoi(input_data[3]);
+
+
+
+
+    map<string, int> wordsCount;
+
+
+    // Read file with text
+    vector<string> vectorWords;
+    ifstream file;
+    file.open(infile);
+
+    if (!file.is_open()){
+        cerr << "Error opening file";
+    }
+
+    string word;
+    while (file >> word) {
+        for (size_t i = 0, len = word.size(); i < len; i++)
+        {
+            auto to = begin(word);
+            for (auto from : word)
+                if (!ispunct(from))
+                    *to++ = from;
+            word.resize(distance(begin(word), to));
+        }
+
+        transform(word.begin(), word.end(), word.begin(), ::tolower);
+        vectorWords.push_back(word);
+    }
+    file.close();
+
+
+    vector<int> list_of_words_amount = SplitVector(vectorWords, threads_n);
+
+
+    vector<future<map<string, int>>> futures;
+    auto start = get_current_time_fenced();
+    for (int i = 0; i < list_of_words_amount.size() - 1; ++i) {
+        futures.push_back(async(CountWords, cref(vectorWords), list_of_words_amount[i], list_of_words_amount[i + 1]));
+    }
+    for(size_t i = 0; i<futures.size(); ++i)
     {
-        reducer(m, result_futures[i].get());
+        reducer(wordsCount, futures[i].get());
     }
+    auto finish = get_current_time_fenced();
+    auto total = finish - start;
+    cout << "Time: " << to_us(total) << endl;
+    printMap(wordsCount);
+    write_to_file(wordsCount, "result.txt");
 
-
-//    printMap(checkM);
-//    cout << "==================================" << endl;
-
-    write_to_file(m, argv[3]);
-    printMap(m);
-    return 0;
 }
+
+
+
+
+
 
