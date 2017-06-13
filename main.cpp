@@ -1,17 +1,17 @@
+//#include <boost/algorithm/string/replace.hpp>
 #include <iostream>
 #include <fstream>
 #include <map>
 #include <vector>
 #include <thread>
-#include <set>
-#include <algorithm>
-#include <iterator>
 #include <mutex>
-#include <future>
 #include <sstream>
+#include <future>
+#include <algorithm>
+
 
 using namespace std;
-
+//g++ read.cpp -pthread -std=c++11
 
 inline std::chrono::high_resolution_clock::time_point get_current_time_fenced() {
     std::atomic_thread_fence(memory_order_seq_cst);
@@ -25,20 +25,12 @@ inline long long to_us(const D& d) {
     return std::chrono::duration_cast<chrono::microseconds>(d).count();
 }
 
-void printMap(const map<string,int> &m) {
+void printMap(const map<string, int> &m) {
     for (auto elem : m) {
-        cout << elem.first << ":" << elem.second << "\n";
+        cout << elem.first << " : " << elem.second << "\n";
     }
 }
 
-void write_to_file(const map<string,int>  &m, string path) {
-    ofstream myfile;
-    myfile.open(path);
-    for (auto elem : m) {
-        myfile << elem.first << "    " << elem.second << "\n";
-    }
-    myfile.close();
-}
 
 vector<string> open_read(string path) {
     ifstream myfile;
@@ -67,23 +59,30 @@ vector<string> open_read(string path) {
     return words;
 }
 
+void write_to_file(const map<string, int> &m, string path) {
+    ofstream myfile;
+    myfile.open(path);
+    for (auto elem : m) {
+        myfile << elem.first << "    " << elem.second << "\n";
+    }
+    myfile.close();
+}
 
-
-map<string, int> CountWords(const vector<string>& wordsVector, int start, int end) {
+map<string, int> mapper(int l, int r, const vector<string> &words) {
     map<string, int> mp;
-    for (; start <= end; ++start) {
-        ++mp[wordsVector[start]];
+    for (; l <= r; ++l) {
+        ++mp[words[l]];
     }
     return mp;
+
 }
-void reducer( map<string, int> &wordsCount, const map<string, int>& local_map){
-    for (auto w: local_map) {
-        wordsCount[w.first] += w.second;
+
+void reducer( map<string, int> &master, const map<string, int>& mp){
+    for (auto w: mp) {
+        master[w.first] += w.second;
     }
 }
 
-
-// Divide vector into n equally parts, n - number of threads
 vector<int> SplitVector(const vector<string>& vec, int n) {
 
     vector<int> outVec;
@@ -103,7 +102,7 @@ vector<int> SplitVector(const vector<string>& vec, int n) {
 }
 
 
-int main() {
+int main(int argc, char *argv[]) {  // input_file, threads, output_file
 
     string input_data[4], infile, out_by_a, out_by_n;
     int threads_n;
@@ -140,38 +139,37 @@ int main() {
     threads_n = stoi(input_data[3]);
 
 
+    vector<string> words;
+    map<string, int> m;
+    vector< future<map<string, int>> > result_futures;
 
+    words = open_read(infile);
 
-    map<string, int> wordsCount;
+    vector<int> list_of_words_amount = SplitVector(words, threads_n);
 
-
-    // Read file with text
-    vector<string> vectorWords;
-    vectorWords = open_read("data.txt");
-
-
-    vector<int> list_of_words_amount = SplitVector(vectorWords, threads_n);
-
-
-    vector<future<map<string, int>>> futures;
     auto start = get_current_time_fenced();
-    for (int i = 0; i < list_of_words_amount.size() - 1; ++i) {
-        futures.push_back(async(CountWords, cref(vectorWords), list_of_words_amount[i], list_of_words_amount[i + 1]));
+    for (int a = 0; a < list_of_words_amount.size()-1; ++a) {
+
+//        cout << (i + 1) << " interval from " << a << " to " << b - 1 << " word" << endl;
+        result_futures.push_back(
+                async(std::launch::async, mapper,  list_of_words_amount[a],  list_of_words_amount[a+1] - 1, cref(words))
+        );
     }
-    for(size_t i = 0; i<futures.size(); ++i)
+
+    vector<map<string, int>> results;
+    for(size_t i = 0; i<result_futures.size(); ++i)
     {
-        reducer(wordsCount, futures[i].get());
+        reducer(m, result_futures[i].get());
     }
     auto finish = get_current_time_fenced();
     auto total = finish - start;
     cout << "Time: " << to_us(total) << endl;
-    printMap(wordsCount);
-    write_to_file(wordsCount, "result.txt");
 
+
+
+
+    write_to_file(m, "result.txt");
+    printMap(m);
+    return 0;
 }
-
-
-
-
-
 
