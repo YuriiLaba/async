@@ -40,6 +40,34 @@ void write_to_file(const map<string,int>  &m, string path) {
     myfile.close();
 }
 
+vector<string> open_read(string path) {
+    ifstream myfile;
+    vector<string> words;
+    string word;
+    myfile.open(path);
+    if (!myfile.is_open()) {
+        cerr << "Error" << endl;
+        return words;
+    }
+    string formated_word;
+    while (myfile >> word) {
+        for (size_t i = 0, len = word.size(); i < len; i++)
+        {
+            auto to = begin(word);
+            for (auto from : word)
+                if (!ispunct(from))
+                    *to++ = from;
+            word.resize(distance(begin(word), to));
+        }
+
+        transform(word.begin(), word.end(), word.begin(), ::tolower);
+        words.push_back(word);
+    }
+    myfile.close();
+    return words;
+}
+
+
 
 map<string, int> CountWords(const vector<string>& wordsVector, int start, int end) {
     map<string, int> mp;
@@ -119,28 +147,7 @@ int main() {
 
     // Read file with text
     vector<string> vectorWords;
-    ifstream file;
-    file.open(infile);
-
-    if (!file.is_open()){
-        cerr << "Error opening file";
-    }
-
-    string word;
-    while (file >> word) {
-        for (size_t i = 0, len = word.size(); i < len; i++)
-        {
-            auto to = begin(word);
-            for (auto from : word)
-                if (!ispunct(from))
-                    *to++ = from;
-            word.resize(distance(begin(word), to));
-        }
-
-        transform(word.begin(), word.end(), word.begin(), ::tolower);
-        vectorWords.push_back(word);
-    }
-    file.close();
+    vectorWords = open_read("data.txt");
 
 
     vector<int> list_of_words_amount = SplitVector(vectorWords, threads_n);
